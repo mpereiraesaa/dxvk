@@ -197,7 +197,10 @@ namespace dxvk {
 
   private:
     
-    std::atomic<uint64_t> m_refCount  = { 0u };
+    // 32-bit so that 32-bit builds use locked add/sub rather
+    // than cmpxchg8b loops; a plain reference count cannot
+    // exceed 32 bits in a 32-bit address space.
+    std::atomic<uint32_t> m_refCount  = { 0u };
     uint64_t              m_trackingId = 0u;
 
     DxvkSamplerPool*      m_pool      = nullptr;

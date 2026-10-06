@@ -313,6 +313,26 @@ namespace dxvk {
   using D3D9CapturableState = D3D9State<dynamic_item>;
   using D3D9DeviceState = D3D9State<static_item>;
 
+  /**
+   * \brief Copies 16-byte shader constant registers
+   *
+   * Equivalent to a memcpy of \c Count * 16 bytes. Applications
+   * typically set a handful of registers per call, many times per
+   * draw, so an inline SSE copy beats an out-of-line call to the
+   * CRT memcpy (an import thunk plus a size dispatch).
+   */
+  inline void CopyConstantRegisters(void* pDst, const void* pSrc, UINT Count) {
+#ifdef DXVK_ARCH_X86
+    auto dst = reinterpret_cast<__m128i*>(pDst);
+    auto src = reinterpret_cast<const __m128i*>(pSrc);
+
+    for (UINT i = 0; i < Count; i++)
+      _mm_storeu_si128(dst + i, _mm_loadu_si128(src + i));
+#else
+    std::memcpy(pDst, pSrc, size_t(Count) * 16u);
+#endif
+  }
+
   template <
     DxsoProgramType  ProgramType,
     D3D9ConstantType ConstantType,
@@ -328,9 +348,8 @@ namespace dxvk {
       if constexpr (ConstantType == D3D9ConstantType::Float) {
 
         if (!FloatEmu) {
-          size_t size = Count * sizeof(Vector4);
-
-          std::memcpy(set->fConsts[StartRegister].data, pConstantData, size);
+          static_assert(sizeof(Vector4) == 16u);
+          CopyConstantRegisters(set->fConsts[StartRegister].data, pConstantData, Count);
         }
         else {
           for (UINT i = 0; i < Count; i++)
@@ -338,9 +357,8 @@ namespace dxvk {
         }
       }
       else if constexpr (ConstantType == D3D9ConstantType::Int) {
-        size_t size = Count * sizeof(Vector4i);
-
-        std::memcpy(set->iConsts[StartRegister].data, pConstantData, size);
+        static_assert(sizeof(Vector4i) == 16u);
+        CopyConstantRegisters(set->iConsts[StartRegister].data, pConstantData, Count);
       }
       else {
         for (uint32_t i = 0; i < Count; i++) {

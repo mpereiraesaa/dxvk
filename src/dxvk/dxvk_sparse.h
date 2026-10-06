@@ -467,9 +467,19 @@ namespace dxvk {
      *
      * Atomically increments both the reference count
      * as well as the use count for the given access.
+     *
+     * The reference count and the read/write use counts are kept
+     * in two separate 32-bit words rather than one packed 64-bit
+     * word, so that 32-bit builds use plain locked add/sub
+     * instructions instead of cmpxchg8b retry loops. Plain
+     * references (\c DxvkAccess::None), which are by far the most
+     * common, only touch the reference count.
      */
     force_inline void acquire(DxvkAccess access) {
-      m_useCount.fetch_add(getIncrement(access), std::memory_order_acquire);
+      if (access != DxvkAccess::None)
+        m_useCount.fetch_add(getUseIncrement(access), std::memory_order_acquire);
+
+      m_refCount.fetch_add(1u, std::memory_order_acquire);
     }
 
     /**
@@ -479,10 +489,12 @@ namespace dxvk {
      * as well as the use count for the given access.
      */
     force_inline void release(DxvkAccess access) {
-      uint64_t increment = getIncrement(access);
-      uint64_t remaining = m_useCount.fetch_sub(increment, std::memory_order_release);
+      if (access != DxvkAccess::None)
+        m_useCount.fetch_sub(getUseIncrement(access), std::memory_order_release);
 
-      if (unlikely(remaining == increment))
+      // Every access reference also holds a plain reference, so
+      // the resource dies exactly when the last reference is gone.
+      if (unlikely(m_refCount.fetch_sub(1u, std::memory_order_acq_rel) == 1u))
         delete this;
     }
 
@@ -493,7 +505,9 @@ namespace dxvk {
      * \param [in] to New access type
      */
     force_inline void convertRef(DxvkAccess from, DxvkAccess to) {
-      uint64_t increment = getIncrement(to) - getIncrement(from);
+      // Unsigned wrap-around makes this a single atomic update
+      // even when moving a reference between the two fields.
+      uint32_t increment = getUseIncrement(to) - getUseIncrement(from);
 
       if (increment)
         m_useCount.fetch_add(increment, std::memory_order_acq_rel);
@@ -510,7 +524,10 @@ namespace dxvk {
      * \returns \c true if the resource is in use
      */
     force_inline bool isInUse(DxvkAccess access) const {
-      return m_useCount.load(std::memory_order_acquire) >= getIncrement(access);
+      if (access == DxvkAccess::None)
+        return m_refCount.load(std::memory_order_acquire) != 0u;
+
+      return m_useCount.load(std::memory_order_acquire) >= getUseIncrement(access);
     }
 
     /**
@@ -523,14 +540,13 @@ namespace dxvk {
      * \returns \c true on success
      */
     Rc<DxvkPagedResource> tryAcquire() {
-      uint64_t increment = getIncrement(DxvkAccess::None);
-      uint64_t refCount = m_useCount.load(std::memory_order_acquire);
+      uint32_t refCount = m_refCount.load(std::memory_order_acquire);
 
       do {
         if (!refCount)
           return nullptr;
-      } while (!m_useCount.compare_exchange_strong( refCount,
-        refCount + increment, std::memory_order_relaxed));
+      } while (!m_refCount.compare_exchange_strong( refCount,
+        refCount + 1u, std::memory_order_relaxed));
 
       return Rc<DxvkPagedResource>::unsafeCreate(this);
     }
@@ -657,14 +673,21 @@ namespace dxvk {
 
   private:
 
-    std::atomic<uint64_t> m_useCount = { 0u };
+    // Total number of references, including access references
+    std::atomic<uint32_t> m_refCount = { 0u };
+    // Read access references in the low 16 bits, write access
+    // references in the high 16 bits. Access references are only
+    // created by command list tracking, at most one per access
+    // type and command list, so 16 bits cannot overflow.
+    std::atomic<uint32_t> m_useCount = { 0u };
     uint64_t              m_trackId = { 0u };
     uint64_t              m_cookie = { 0u };
 
     bool                  m_hasGfxStores = false;
 
-    static constexpr uint64_t getIncrement(DxvkAccess access) {
-      return uint64_t(1u) << (uint32_t(access) * 20u);
+    static constexpr uint32_t getUseIncrement(DxvkAccess access) {
+      return access == DxvkAccess::None ? 0u
+        : (1u << ((uint32_t(access) - 1u) * 16u));
     }
 
     static std::atomic<uint64_t> s_cookie;
