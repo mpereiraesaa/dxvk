@@ -5014,8 +5014,22 @@ namespace dxvk {
         TrackTextureMappingBufferSequenceNumber(pResource, Subresource);
       }
 
+      // A small system-memory readback target (GetRenderTargetData) may be
+      // read without waiting when the application opted in: the lock sees
+      // what earlier copies left in the buffer, and the pending copy is
+      // only pushed towards the GPU.
+      const bool lateReadback = m_d3d9Options.asyncSmallReadback
+        && pResource->GetImage() == nullptr
+        && desc.Pool == D3DPOOL_SYSTEMMEM
+        && (Flags & D3DLOCK_READONLY)
+        && uint64_t(levelExtent.width) * levelExtent.height * levelExtent.depth <= 64u * 64u;
+
+      if (lateReadback) {
+        if (mappedBuffer->isInUse(DxvkAccess::Write))
+          ConsiderFlush(GpuFlushType::ImplicitWeakHint);
+      }
       // Wait until the buffer is idle which may include the copy (and resolve) we just issued.
-      if (!WaitForResource(*mappedBuffer, pResource->GetMappingBufferSequenceNumber(Subresource), Flags))
+      else if (!WaitForResource(*mappedBuffer, pResource->GetMappingBufferSequenceNumber(Subresource), Flags))
         return D3DERR_WASSTILLDRAWING;
     }
 

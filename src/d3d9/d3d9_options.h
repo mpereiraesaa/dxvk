@@ -66,6 +66,13 @@ namespace dxvk {
     /// Defer surface creation
     bool deferSurfaceCreation;
 
+    /// Lets a read-only lock of a small system-memory surface that is the
+    /// destination of a pending GetRenderTargetData return the data the
+    /// surface already holds instead of waiting for the copy, so a game that
+    /// reads back a few pixels every frame sees them a frame or two late
+    /// rather than draining the command stream and the GPU each time.
+    bool asyncSmallReadback;
+
     /// Anisotropic filter override
     ///
     /// Enforces anisotropic filtering with the
