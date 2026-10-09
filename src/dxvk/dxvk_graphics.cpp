@@ -1380,20 +1380,38 @@ namespace dxvk {
     DxvkGraphicsPipelineFastInstanceKey key(m_device,
       m_shaders, state, m_flags, m_specConstantMask);
 
-    std::lock_guard lock(m_fastMutex);
+    std::unique_lock lock(m_fastMutex);
 
+    // Compiling identical Vulkan pipelines concurrently has been buggy
+    // on some drivers, so a null map entry marks a compile in flight and
+    // any thread needing that exact pipeline waits for it. Pipelines
+    // with different keys may compile concurrently, so the lock is not
+    // held across the driver call: that stalled the CS thread on every
+    // new state of these shaders while a worker compiled another one.
     auto entry = m_fastPipelines.find(key);
+
+    while (entry != m_fastPipelines.end() && !entry->second) {
+      m_fastCond.wait(lock);
+      entry = m_fastPipelines.find(key);
+    }
+
     if (entry != m_fastPipelines.end())
       return entry->second;
 
-    // Keep pipeline locked to prevent multiple threads from compiling
-    // identical Vulkan pipelines. This should be rare, but has been
-    // buggy on some drivers in the past, so just don't allow it.
+    m_fastPipelines.insert({ key, VK_NULL_HANDLE });
+    lock.unlock();
+
     VkPipeline handle = createOptimizedPipeline(key);
 
-    if (handle)
-      m_fastPipelines.insert({ key, handle });
+    lock.lock();
 
+    // Failed compiles are not cached, so a waiter retries, as before.
+    if (handle)
+      m_fastPipelines.find(key)->second = handle;
+    else
+      m_fastPipelines.erase(key);
+
+    m_fastCond.notify_all();
     return handle;
   }
 
