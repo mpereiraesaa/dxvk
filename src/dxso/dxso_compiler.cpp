@@ -3317,6 +3317,9 @@ void DxsoCompiler::emitControlFlowGenericLoop(
   void DxsoCompiler::emitLinkerOutputSetup() {
     bool outputtedColor0 = false;
     bool outputtedColor1 = false;
+    bool outputtedFog    = m_fog.id != 0;
+
+    uint32_t outputtedTexcoords = 0u;
 
     for (uint32_t i = 0; i < m_osgn.elemCount; i++) {
       const auto& elem = m_osgn.elems[i];
@@ -3327,6 +3330,13 @@ void DxsoCompiler::emitControlFlowGenericLoop(
           outputtedColor0 = true;
         else
           outputtedColor1 = true;
+      }
+      else if (elem.semantic.usage == DxsoUsage::Texcoord) {
+        if (elem.semantic.usageIndex < caps::TextureStageCount)
+          outputtedTexcoords |= 1u << elem.semantic.usageIndex;
+      }
+      else if (elem.semantic.usage == DxsoUsage::Fog) {
+        outputtedFog = true;
       }
       
       DxsoRegisterInfo info;
@@ -3466,6 +3476,26 @@ void DxsoCompiler::emitControlFlowGenericLoop(
 
     if (!outputtedColor1)
       OutputDefault(DxsoSemantic{ DxsoUsage::Color, 1 });
+
+    // Optionally declare every remaining output a fixed-function or
+    // SM1/2 pixel shader can read. The value is zero, which is exactly
+    // what DxvkShader::eliminateInput substitutes for an undefined
+    // input when the pipeline is late-compiled, so rendering does not
+    // change; the pair merely becomes fast-linkable since the vertex
+    // shader output mask now covers the pixel shader input mask.
+    if (m_moduleInfo.options.padVsOutputs) {
+      for (uint32_t i = 0; i < caps::TextureStageCount; i++) {
+        if (!(outputtedTexcoords & (1u << i)))
+          OutputDefault(DxsoSemantic{ DxsoUsage::Texcoord, i });
+      }
+
+      // A vec4 like a SM3 dcl_fog output: it covers both the scalar
+      // fog input of the fixed-function and SM1/2 pixel shaders and
+      // the vec4 input of a SM3 dcl_fog, since an output may be wider
+      // than the input it feeds (maintenance4, core in Vulkan 1.3).
+      if (!outputtedFog)
+        OutputDefault(DxsoSemantic{ DxsoUsage::Fog, 0 });
+    }
 
     auto pointInfo = GetPointSizeInfoVS(m_spec, m_module, m_vs.oPos.id, 0, 0, m_rsBlock, m_specUbo, false);
 

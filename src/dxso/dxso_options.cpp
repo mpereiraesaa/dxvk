@@ -31,6 +31,7 @@ namespace dxvk {
 
     sincosEmulation     = options.sincosEmulation;
     drefScaling         = options.drefScaling;
+    padVsOutputs        = options.padVsOutputs;
   }
 
 }

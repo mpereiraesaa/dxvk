@@ -648,6 +648,12 @@ namespace dxvk {
     bool canCreateBasePipeline(
       const DxvkGraphicsPipelineStateInfo& state) const;
 
+    const char* getFastLinkBlocker(
+      const DxvkGraphicsPipelineStateInfo& state) const;
+
+    void logFastLinkFailure(
+      const char*                          reason) const;
+
     VkPipeline getBasePipeline(
       const DxvkGraphicsPipelineStateInfo& state);
 

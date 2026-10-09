@@ -179,6 +179,11 @@ namespace dxvk {
     /// submit about half as often. Locks and queries still force a submission
     /// when fewer than two are in flight, so readback latency is unaffected.
     bool weakRenderTargetFlushHint;
+
+    /// Make programmable vertex shaders write zero to every TEXCOORD0-7
+    /// and FOG output they do not write themselves, so that any pixel
+    /// shader reading them can be fast-linked with VK_EXT_graphics_pipeline_library
+    bool padVsOutputs;
   };
 
 }

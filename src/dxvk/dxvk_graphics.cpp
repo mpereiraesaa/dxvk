@@ -1073,7 +1073,12 @@ namespace dxvk {
       if (!instance) {
         // Keep pipeline object locked, at worst we're going to stall
         // a state cache worker and the current thread needs priority.
-        bool canCreateBasePipeline = this->canCreateBasePipeline(state);
+        const char* fastLinkBlocker = this->getFastLinkBlocker(state);
+        bool canCreateBasePipeline = fastLinkBlocker == nullptr;
+
+        if (unlikely(fastLinkBlocker != nullptr && m_device->config().logFastLinkFailures))
+          this->logFastLinkFailure(fastLinkBlocker);
+
         instance = this->createInstance(state, canCreateBasePipeline);
 
         // Unlock here since we may dispatch the pipeline to a worker,
@@ -1223,8 +1228,37 @@ namespace dxvk {
   
   bool DxvkGraphicsPipeline::canCreateBasePipeline(
     const DxvkGraphicsPipelineStateInfo& state) const {
+    return this->getFastLinkBlocker(state) == nullptr;
+  }
+
+
+  void DxvkGraphicsPipeline::logFastLinkFailure(
+    const char*                          reason) const {
+    std::stringstream sstr;
+    sstr << "DxvkGraphicsPipeline: no fast link (" << reason << "):";
+
+    if (m_shaders.vs != nullptr) {
+      sstr << " vs=" << m_shaders.vs->debugName()
+           << " out=0x" << std::hex << m_shaders.vs->info().outputMask << std::dec;
+    }
+
+    if (m_shaders.gs != nullptr)
+      sstr << " gs=" << m_shaders.gs->debugName();
+
+    if (m_shaders.fs != nullptr) {
+      sstr << " fs=" << m_shaders.fs->debugName()
+           << " in=0x" << std::hex << m_shaders.fs->info().inputMask
+           << " flat=0x" << m_shaders.fs->info().flatShadingInputs << std::dec;
+    }
+
+    Logger::info(sstr.str());
+  }
+
+
+  const char* DxvkGraphicsPipeline::getFastLinkBlocker(
+    const DxvkGraphicsPipelineStateInfo& state) const {
     if (!m_vsLibrary || !m_fsLibrary)
-      return false;
+      return "no shader pipeline library";
 
     // We do not implement setting certain rarely used render
     // states dynamically since they are generally not used
@@ -1233,14 +1267,14 @@ namespace dxvk {
     if (state.rs.polygonMode() != VK_POLYGON_MODE_FILL
      || state.rs.conservativeMode() != VK_CONSERVATIVE_RASTERIZATION_MODE_DISABLED_EXT
      || (state.rs.lineMode() != VK_LINE_RASTERIZATION_MODE_DEFAULT_EXT && isLineRendering))
-      return false;
+      return "rasterizer state";
 
     // Depth clip is assumed to be enabled. If the driver does not
     // support dynamic depth clip, we'd have to late-compile anyway
     // unless the pipeline is used multiple times.
     if (!m_device->features().extExtendedDynamicState3.extendedDynamicState3DepthClipEnable
      && !state.rs.depthClipEnable())
-      return false;
+      return "depth clip disabled";
 
     // If the vertex shader uses any input locations not provided by
     // the input layout, we need to patch the shader.
@@ -1251,7 +1285,7 @@ namespace dxvk {
       ilAttributeMask |= 1u << state.ilAttributes[i].location();
 
     if ((vsInputMask & ilAttributeMask) != vsInputMask)
-      return false;
+      return "vs input not in input layout";
 
     if (m_shaders.gs != nullptr) {
       // If the geometry shader's input topology is not compatible with
@@ -1260,14 +1294,14 @@ namespace dxvk {
       VkPrimitiveTopology gsTopology = m_shaders.gs->info().inputTopology;
 
       if (determineGsInputTopology(gsTopology, iaTopology) != gsTopology)
-        return false;
+        return "gs input topology";
     }
 
     if (m_shaders.tcs != nullptr) {
       // If tessellation shaders are present, the input patch
       // vertex count must match the shader's definition.
       if (m_shaders.tcs->info().patchVertexCount != state.ia.patchVertexCount())
-        return false;
+        return "tcs patch vertex count";
     }
 
     if (m_shaders.fs != nullptr) {
@@ -1282,15 +1316,15 @@ namespace dxvk {
         vsIoMask = m_shaders.tes->info().outputMask;
 
       if ((vsIoMask & fsIoMask) != fsIoMask)
-        return false;
+        return "fs reads inputs not written by previous stage";
 
       // Dual-source blending requires patching the fragment shader
       if (state.useDualSourceBlending())
-        return false;
+        return "dual-source blending";
 
       // Flat shading requires patching the fragment shader
       if (state.rs.flatShading() && m_shaders.fs->info().flatShadingInputs)
-        return false;
+        return "flat shading";
 
       // If dynamic multisample state is not supported and sample shading
       // is enabled, the library is compiled with a sample count of 1.
@@ -1305,12 +1339,12 @@ namespace dxvk {
         if (!canUseDynamicMultisampleState
          && (state.ms.sampleCount() != VK_SAMPLE_COUNT_1_BIT
           || state.ms.sampleMask() == 0))
-          return false;
+          return "sample-rate shading without dynamic multisample state";
 
         if (!canUseDynamicAlphaToCoverage
          && (state.ms.enableAlphaToCoverage())
          && !m_shaders.fs->flags().test(DxvkShaderFlag::ExportsSampleMask))
-          return false;
+          return "alpha-to-coverage without dynamic state";
       }
     }
 
@@ -1318,10 +1352,10 @@ namespace dxvk {
     for (uint32_t i = 0; i < MaxNumRenderTargets; i++) {
       if ((m_fsOut & (1u << i)) && state.writesRenderTarget(i)
        && !util::isIdentityMapping(state.omSwizzle[i].mapping()))
-        return false;
+        return "render target swizzle";
     }
 
-    return true;
+    return nullptr;
   }
 
 

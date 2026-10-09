@@ -27,6 +27,10 @@ namespace dxvk {
     /// Enables pipeline lifetime tracking
     Tristate trackPipelineLifetime = Tristate::Auto;
 
+    /// Log the reason and the shader names whenever a graphics
+    /// pipeline cannot be fast-linked and is compiled inline
+    bool logFastLinkFailures = false;
+
     /// Shader-related options
     Tristate useRawSsbo = Tristate::Auto;
 
