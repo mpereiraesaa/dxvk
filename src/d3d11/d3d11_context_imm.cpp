@@ -18,7 +18,7 @@ namespace dxvk {
   : D3D11CommonContext<D3D11ImmediateContext>(pParent, Device, 0, DxvkCsChunkFlag::SingleUse),
     m_csThread(Device, Device->createContext()),
     m_submissionFence(new sync::CallbackFence()),
-    m_flushTracker(GetMaxFlushType(pParent, Device)),
+    m_flushTracker(GetMaxFlushType(pParent, Device), Device->config().implicitFlushChunkScale),
     m_stagingBufferFence(new sync::Fence(0)),
     m_multithread(this, false, pParent->GetOptions()->enableContextLock),
     m_videoContext(this, Device) {

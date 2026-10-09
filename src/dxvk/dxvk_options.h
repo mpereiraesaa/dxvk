@@ -43,6 +43,10 @@ namespace dxvk {
     /// Latency tolerance, in microseconds
     int32_t latencyTolerance = 0u;
 
+    /// Multiplier for the chunk count thresholds of the
+    /// implicit flush heuristic. 1.0 is DXVK's default.
+    float implicitFlushChunkScale = 1.0f;
+
     /// Disable VK_NV_low_latency2. This extension
     /// appears to be all sorts of broken on 32-bit.
     Tristate disableNvLowLatency2 = Tristate::Auto;

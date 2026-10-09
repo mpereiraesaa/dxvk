@@ -37,7 +37,15 @@ namespace dxvk {
 
   public:
 
-    GpuFlushTracker(GpuFlushType maxAllowed);
+    /**
+     * \brief Creates flush tracker
+     *
+     * \param [in] maxAllowed Strongest implicit flush type to honour
+     * \param [in] chunkScale Multiplier applied to the chunk count
+     *    thresholds of the implicit flush heuristic. 1.0 keeps the
+     *    built-in thresholds, larger values make implicit flushes rarer.
+     */
+    GpuFlushTracker(GpuFlushType maxAllowed, float chunkScale);
 
     /**
      * \brief Checks whether a context flush should be performed
@@ -68,6 +76,9 @@ namespace dxvk {
 
     GpuFlushType  m_maxType               = GpuFlushType::ImplicitWeakHint;
     GpuFlushType  m_lastMissedType        = GpuFlushType::ImplicitWeakHint;
+
+    uint32_t      m_minChunkCount         =  3u;
+    uint32_t      m_maxChunkCount         = 20u;
 
     uint64_t      m_lastFlushChunkId      = 0ull;
     uint64_t      m_lastFlushSubmissionId = 0ull;

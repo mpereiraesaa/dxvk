@@ -58,7 +58,7 @@ namespace dxvk {
     , m_csThread           ( dxvkDevice, dxvkDevice->createContext() )
     , m_csChunk            ( AllocCsChunk() )
     , m_submissionFence    ( new sync::Fence() )
-    , m_flushTracker       ( GetMaxFlushType() )
+    , m_flushTracker       ( GetMaxFlushType(), dxvkDevice->config().implicitFlushChunkScale )
     , m_d3d9Interop        ( this )
     , m_d3d9On12           ( this )
     , m_d3d8Bridge         ( this ) {
