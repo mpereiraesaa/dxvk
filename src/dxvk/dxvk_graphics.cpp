@@ -1113,12 +1113,25 @@ namespace dxvk {
       if (this->canCreateBasePipeline(state))
         return;
 
+      // Compile before taking the instance lock: holding it across a
+      // compile of 100 ms or more stalls the CS thread on every other
+      // state of these shaders. The fast-pipeline lock still keeps two
+      // threads from compiling the same Vulkan pipeline, and a CS thread
+      // that needs this very state meanwhile waits there, then finds it.
+      VkPipeline fastHandle = this->getOptimizedPipeline(state);
+
+      if (!fastHandle)
+        this->logPipelineState(LogLevel::Error, state);
+
       // Prevent other threads from adding new instances and check again
       std::unique_lock<dxvk::mutex> lock(m_mutex);
       instance = this->findInstance(state);
 
-      if (!instance)
-        instance = this->createInstance(state, false);
+      if (!instance) {
+        m_stats->numGraphicsPipelines += 1;
+        instance = &(*m_pipelines.emplace(state, VK_NULL_HANDLE, fastHandle, computeAttachmentMask(state)));
+        return;
+      }
     }
 
     // Exit if another thread is already compiling
