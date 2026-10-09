@@ -1,0 +1,23 @@
+[binaries]
+c = 'i686-w64-mingw32-gcc'
+cpp = 'i686-w64-mingw32-g++'
+ar = 'i686-w64-mingw32-ar'
+strip = 'i686-w64-mingw32-strip'
+windres = 'i686-w64-mingw32-windres'
+
+[properties]
+needs_exe_wrapper = true
+
+[built-in options]
+# PlayStation 5 CPU (AMD Zen 2). meson.build still adds -msse/-msse2/-msse3/-mfpmath=sse;
+# -march=znver2 enables SSE4/AVX/AVX2/FMA/BMI2 codegen and Zen 2 scheduling on top.
+c_args = ['-march=znver2', '-mtune=znver2']
+cpp_args = ['-march=znver2', '-mtune=znver2']
+c_link_args = ['-march=znver2', '-mtune=znver2']
+cpp_link_args = ['-march=znver2', '-mtune=znver2']
+
+[host_machine]
+system = 'windows'
+cpu_family = 'x86'
+cpu = 'x86'
+endian = 'little'
