@@ -1,6 +1,180 @@
+#include <algorithm>
+#include <cstdio>
+#include <unordered_map>
+#include <vector>
+#include <x86intrin.h>
+
 #include "dxvk_cs.h"
 
+#include "../util/util_env.h"
+
 namespace dxvk {
+
+  bool DxvkCsProfile::s_enabled = false;
+
+  namespace {
+
+    struct DxvkCsProfileEntry {
+      uint32_t id    = 0;
+      uint64_t calls = 0;
+      uint64_t ticks = 0;
+    };
+
+    struct DxvkCsProfileState {
+      bool     onCsThread = false;
+      uint32_t nextId     = 1;
+      uint64_t lastFrame  = 0;
+      uint64_t lastTsc    = 0;
+      uint64_t busy       = 0;
+      uint64_t chunks     = 0;
+      uint64_t commands   = 0;
+      std::unordered_map<const char*, DxvkCsProfileEntry> entries;
+    };
+
+    // The CS thread owns the state; no other thread touches it.
+    thread_local DxvkCsProfileState g_csProfile;
+
+    uint64_t measureTscHz() {
+      LARGE_INTEGER frequency = { };
+      LARGE_INTEGER start = { };
+      LARGE_INTEGER now = { };
+
+      if (!QueryPerformanceFrequency(&frequency) || !frequency.QuadPart
+       || !QueryPerformanceCounter(&start))
+        return 0;
+
+      uint64_t tsc0 = __rdtsc();
+
+      do {
+        if (!QueryPerformanceCounter(&now))
+          return 0;
+      } while (uint64_t(now.QuadPart - start.QuadPart) * 50 < uint64_t(frequency.QuadPart));
+
+      uint64_t tsc1 = __rdtsc();
+      uint64_t elapsed = uint64_t(now.QuadPart - start.QuadPart);
+      return elapsed ? (tsc1 - tsc0) * uint64_t(frequency.QuadPart) / elapsed : 0;
+    }
+
+  }
+
+
+  void DxvkCsProfile::start() {
+    auto& state = g_csProfile;
+    state.onCsThread = true;
+    state.lastTsc = __rdtsc();
+
+    if (env::getEnvVar("DXVK_CS_PROFILE") != "1")
+      return;
+
+    s_enabled = true;
+    std::fprintf(stderr, "DXVK_CS_PROFILE version=1 start tsc_hz=%llu\n",
+      static_cast<unsigned long long>(measureTscHz()));
+  }
+
+
+  void DxvkCsProfile::record(const char* name, uint64_t ticks) {
+    auto& state = g_csProfile;
+
+    if (!state.onCsThread)
+      return;
+
+    auto& entry = state.entries[name];
+
+    if (!entry.id) {
+      entry.id = state.nextId++;
+      std::fprintf(stderr, "DXVK_CS_PROFILE name id=%u text=%s\n", entry.id, name);
+    }
+
+    entry.calls += 1;
+    entry.ticks += ticks;
+    state.busy += ticks;
+    state.commands += 1;
+  }
+
+
+  void DxvkCsProfile::chunk() {
+    if (g_csProfile.onCsThread)
+      g_csProfile.chunks += 1;
+  }
+
+
+  void DxvkCsProfile::endFrame(uint64_t frameId) {
+    auto& state = g_csProfile;
+
+    if (!state.onCsThread)
+      return;
+
+    uint64_t tsc = __rdtsc();
+
+    std::vector<const DxvkCsProfileEntry*> sorted;
+    sorted.reserve(state.entries.size());
+
+    for (const auto& pair : state.entries) {
+      if (pair.second.calls)
+        sorted.push_back(&pair.second);
+    }
+
+    std::sort(sorted.begin(), sorted.end(), [] (const DxvkCsProfileEntry* a, const DxvkCsProfileEntry* b) {
+      return a->ticks != b->ticks ? a->ticks > b->ticks : a->id < b->id;
+    });
+
+    // One ps5log record holds 1024 bytes; twelve entries fit with room.
+    char line[1000];
+    int used = std::snprintf(line, sizeof(line),
+      "DXVK_CS_PROFILE version=1 frame=%llu frames=%llu tsc=%llu wall=%llu busy=%llu chunks=%llu cmds=%llu",
+      static_cast<unsigned long long>(frameId),
+      static_cast<unsigned long long>(frameId > state.lastFrame ? frameId - state.lastFrame : 0),
+      static_cast<unsigned long long>(tsc),
+      static_cast<unsigned long long>(tsc > state.lastTsc ? tsc - state.lastTsc : 0),
+      static_cast<unsigned long long>(state.busy),
+      static_cast<unsigned long long>(state.chunks),
+      static_cast<unsigned long long>(state.commands));
+
+    uint64_t otherCalls = 0;
+    uint64_t otherTicks = 0;
+
+    for (size_t i = 0; i < sorted.size(); i++) {
+      if (i < 12 && used > 0 && size_t(used) < sizeof(line)) {
+        int n = std::snprintf(line + used, sizeof(line) - used, " c%u=%llu/%llu", sorted[i]->id,
+          static_cast<unsigned long long>(sorted[i]->calls),
+          static_cast<unsigned long long>(sorted[i]->ticks));
+
+        if (n > 0 && size_t(used + n) < sizeof(line)) {
+          used += n;
+          continue;
+        }
+
+        line[used] = '\0';
+      }
+
+      otherCalls += sorted[i]->calls;
+      otherTicks += sorted[i]->ticks;
+    }
+
+    if (otherCalls && used > 0 && size_t(used) < sizeof(line)) {
+      int n = std::snprintf(line + used, sizeof(line) - used, " other=%llu/%llu",
+        static_cast<unsigned long long>(otherCalls),
+        static_cast<unsigned long long>(otherTicks));
+
+      if (n <= 0 || size_t(used + n) >= sizeof(line))
+        line[used] = '\0';
+    }
+
+    if (used > 0)
+      std::fprintf(stderr, "%s\n", line);
+
+    for (auto& pair : state.entries) {
+      pair.second.calls = 0;
+      pair.second.ticks = 0;
+    }
+
+    state.lastFrame = frameId;
+    state.lastTsc = tsc;
+    state.busy = 0;
+    state.chunks = 0;
+    state.commands = 0;
+  }
+
   
   DxvkCsChunk::DxvkCsChunk() {
     
@@ -19,6 +193,35 @@ namespace dxvk {
 
   void DxvkCsChunk::executeAll(DxvkContext* ctx) {
     auto cmd = m_head;
+
+    if (unlikely(DxvkCsProfile::enabled())) {
+      DxvkCsProfile::chunk();
+
+      bool singleUse = m_flags.test(DxvkCsChunkFlag::SingleUse);
+
+      if (singleUse)
+        m_commandOffset = 0;
+
+      while (cmd != nullptr) {
+        auto next = cmd->next();
+        uint64_t t0 = __rdtsc();
+        cmd->exec(ctx);
+        uint64_t t1 = __rdtsc();
+        DxvkCsProfile::record(cmd->profileName(), t1 - t0);
+
+        if (singleUse)
+          cmd->~DxvkCsCmd();
+
+        cmd = next;
+      }
+
+      if (singleUse) {
+        m_head = nullptr;
+        m_next = &m_head;
+      }
+
+      return;
+    }
     
     if (m_flags.test(DxvkCsChunkFlag::SingleUse)) {
       m_commandOffset = 0;
@@ -192,6 +395,7 @@ namespace dxvk {
   
   void DxvkCsThread::threadFunc() {
     env::setThreadName("dxvk-cs");
+    DxvkCsProfile::start();
 
     // Local chunk queues, we use two queues and swap between
     // them in order to potentially reduce lock contention.

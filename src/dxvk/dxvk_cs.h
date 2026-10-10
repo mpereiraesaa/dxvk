@@ -53,6 +53,17 @@ namespace dxvk {
      */
     virtual void exec(DxvkContext* ctx) = 0;
 
+    /**
+     * \brief Name for the CS profile
+     *
+     * A string constant unique to the command's type, naming
+     * the function that emitted it. Only read with DXVK_CS_PROFILE.
+     * \returns Static name
+     */
+    virtual const char* profileName() const {
+      return "DxvkCsCmd";
+    }
+
   private:
 
     DxvkCsCmd* m_next = nullptr;
@@ -80,11 +91,75 @@ namespace dxvk {
     void exec(DxvkContext* ctx) {
       m_command(ctx);
     }
+
+    const char* profileName() const {
+      return __PRETTY_FUNCTION__;
+    }
     
   private:
     
     T m_command;
     
+  };
+
+
+  /**
+   * \brief CS thread profile
+   *
+   * With DXVK_CS_PROFILE=1 in the environment, the CS thread times
+   * every command it executes with the TSC and, at each present, logs
+   * one line for the frame: its busy ticks, chunk and command counts,
+   * and ticks by command type (the twelve with the most time, the rest
+   * as other). A command type is named once, when first seen, by the
+   * function that emitted it. Lines go to stderr as DXVK_CS_PROFILE.
+   * Everything here runs on the CS thread only; other threads see the
+   * enabled flag and nothing else.
+   */
+  class DxvkCsProfile {
+
+  public:
+
+    /**
+     * \brief Checks whether the profile is on
+     * \returns \c true if commands are timed
+     */
+    static bool enabled() {
+      return s_enabled;
+    }
+
+    /**
+     * \brief Starts the profile on the CS thread
+     *
+     * Reads the environment, measures the TSC rate
+     * and logs the start line. Called by the CS thread.
+     */
+    static void start();
+
+    /**
+     * \brief Records one executed command
+     * \param [in] name Static type name of the command
+     * \param [in] ticks TSC ticks its execution took
+     */
+    static void record(const char* name, uint64_t ticks);
+
+    /**
+     * \brief Counts an executed chunk
+     */
+    static void chunk();
+
+    /**
+     * \brief Ends a frame
+     *
+     * Logs the frame line and clears the counters.
+     * Called from the present command on the CS thread.
+     * \param [in] frameId DXVK's frame id of the present
+     */
+    static void endFrame(uint64_t frameId);
+
+  private:
+
+    static bool s_enabled;
+
   };
 
 
@@ -161,6 +236,10 @@ namespace dxvk {
     void exec(DxvkContext* ctx) {
       // No const here so that the function can move objects efficiently
       m_command(ctx, reinterpret_cast<M*>(m_data.first()), m_data.count());
+    }
+
+    const char* profileName() const {
+      return __PRETTY_FUNCTION__;
     }
 
     DxvkCsDataBlock* data() {

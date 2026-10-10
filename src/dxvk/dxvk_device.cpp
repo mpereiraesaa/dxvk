@@ -1,3 +1,4 @@
+#include "dxvk_cs.h"
 #include "dxvk_device.h"
 #include "dxvk_instance.h"
 #include "dxvk_latency_builtin.h"
@@ -339,6 +340,9 @@ namespace dxvk {
     latencyInfo.frameId = frameId;
 
     m_submissionQueue.present(presentInfo, latencyInfo, status);
+
+    if (unlikely(DxvkCsProfile::enabled()))
+      DxvkCsProfile::endFrame(frameId);
     
     std::lock_guard<sync::Spinlock> statLock(m_statLock);
     m_statCounters.addCtr(DxvkStatCounter::QueuePresentCount, 1);
