@@ -326,9 +326,11 @@ namespace dxvk {
       auto& entry = m_queueOrdered.queue.emplace_back();
       entry.chunk = std::move(chunk);
       entry.seq = seq;
-
-      m_condOnAdd.notify_one();
     }
+
+    // Wake the CS thread after releasing the lock so
+    // that it does not immediately block on it again
+    m_condOnAdd.notify_one();
     
     return seq;
   }
@@ -347,14 +349,14 @@ namespace dxvk {
       entry.chunk = std::move(chunk);
       entry.seq = timeline;
 
-      m_condOnAdd.notify_one();
-
       if (queue == DxvkCsQueue::HighPriority) {
         // Worker will check this flag after executing any
         // chunk without causing additional lock contention
         m_hasHighPrio.store(true, std::memory_order_release);
       }
     }
+
+    m_condOnAdd.notify_one();
 
     if (synchronize) {
       std::unique_lock<dxvk::mutex> lock(m_counterMutex);
