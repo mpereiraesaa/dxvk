@@ -46,19 +46,23 @@ namespace dxvk {
           DxvkSubmitInfo            submitInfo,
           DxvkLatencyInfo           latencyInfo,
           DxvkSubmitStatus*         status) {
-    std::unique_lock<dxvk::mutex> lock(m_mutex);
+    { std::unique_lock<dxvk::mutex> lock(m_mutex);
 
-    m_finishCond.wait(lock, [this] {
-      return m_submitQueue.size() + m_finishQueue.size() <= MaxNumQueuedCommandBuffers;
-    });
+      m_finishCond.wait(lock, [this] {
+        return m_submitQueue.size() + m_finishQueue.size() <= MaxNumQueuedCommandBuffers;
+      });
 
-    DxvkSubmitEntry entry = { };
-    entry.status = status;
-    entry.submit = std::move(submitInfo);
-    entry.latency = std::move(latencyInfo);
+      DxvkSubmitEntry entry = { };
+      entry.status = status;
+      entry.submit = std::move(submitInfo);
+      entry.latency = std::move(latencyInfo);
 
-    m_submitQueue.push(std::move(entry));
-    m_appendCond.notify_all();
+      m_submitQueue.push(std::move(entry));
+    }
+
+    // Wake the submit thread, the only waiter on this condition variable,
+    // after releasing the lock so that it does not block on it right away.
+    m_appendCond.notify_one();
   }
 
 
@@ -66,15 +70,17 @@ namespace dxvk {
           DxvkPresentInfo           presentInfo,
           DxvkLatencyInfo           latencyInfo,
           DxvkSubmitStatus*         status) {
-    std::unique_lock<dxvk::mutex> lock(m_mutex);
+    { std::unique_lock<dxvk::mutex> lock(m_mutex);
 
-    DxvkSubmitEntry entry = { };
-    entry.status  = status;
-    entry.present = std::move(presentInfo);
-    entry.latency = std::move(latencyInfo);
+      DxvkSubmitEntry entry = { };
+      entry.status  = status;
+      entry.present = std::move(presentInfo);
+      entry.latency = std::move(latencyInfo);
 
-    m_submitQueue.push(std::move(entry));
-    m_appendCond.notify_all();
+      m_submitQueue.push(std::move(entry));
+    }
+
+    m_appendCond.notify_one();
   }
 
 

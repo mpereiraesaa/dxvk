@@ -2970,7 +2970,7 @@ namespace dxvk {
   
   
   void DxvkContext::setDepthStencilState(const DxvkDepthStencilState& ds) {
-    m_state.gp.state.ds = DxvkDsInfo(
+    DxvkDsInfo dsInfo(
       ds.depthTest(),
       ds.depthWrite(),
       m_state.gp.state.ds.enableDepthBoundsTest(),
@@ -2979,7 +2979,7 @@ namespace dxvk {
 
     DxvkStencilOp front = ds.stencilOpFront();
 
-    m_state.gp.state.dsFront = DxvkDsStencilOp(
+    DxvkDsStencilOp dsFront(
       front.failOp(),
       front.passOp(),
       front.depthFailOp(),
@@ -2989,13 +2989,25 @@ namespace dxvk {
 
     DxvkStencilOp back = ds.stencilOpBack();
 
-    m_state.gp.state.dsBack = DxvkDsStencilOp(
+    DxvkDsStencilOp dsBack(
       back.failOp(),
       back.passOp(),
       back.depthFailOp(),
       back.compareOp(),
       back.compareMask(),
       back.writeMask());
+
+    // Front-ends tend to re-send unchanged depth-stencil state, and
+    // dirtying the pipeline state would cost a pipeline lookup and
+    // a dynamic state update on the next draw for nothing.
+    if (m_state.gp.state.ds.eq(dsInfo)
+     && m_state.gp.state.dsFront.eq(dsFront)
+     && m_state.gp.state.dsBack.eq(dsBack))
+      return;
+
+    m_state.gp.state.ds = dsInfo;
+    m_state.gp.state.dsFront = dsFront;
+    m_state.gp.state.dsBack = dsBack;
 
     m_flags.set(
       DxvkContextFlag::GpDirtyPipelineState,
