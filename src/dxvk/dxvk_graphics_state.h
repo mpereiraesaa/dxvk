@@ -376,6 +376,10 @@ namespace dxvk {
       m_enableDepthBoundsTest = VkBool32(enableDepthBoundsTest);
     }
 
+    bool eq(const DxvkDsInfo& other) const {
+      return !std::memcmp(this, &other, sizeof(*this));
+    }
+
   private:
 
     uint16_t m_enableDepthTest        : 1;
@@ -425,6 +429,10 @@ namespace dxvk {
       result.writeMask   = write ? m_writeMask : 0;
       result.reference   = 0;
       return result;
+    }
+
+    bool eq(const DxvkDsStencilOp& other) const {
+      return !std::memcmp(this, &other, sizeof(*this));
     }
 
   private:
