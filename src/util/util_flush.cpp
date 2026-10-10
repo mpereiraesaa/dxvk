@@ -1,10 +1,22 @@
+#include <algorithm>
+
 #include "util_flush.h"
 
 namespace dxvk {
 
-  GpuFlushTracker::GpuFlushTracker(GpuFlushType maxType)
+  GpuFlushTracker::GpuFlushTracker(GpuFlushType maxType, float chunkScale)
   : m_maxType(maxType) {
+    // Scale the built-in chunk count thresholds. Non-positive or NaN
+    // scales fall back to the defaults, and the scaled minimum is kept
+    // at least 1 so that strong hints can still flush at all.
+    constexpr uint32_t baseMinChunkCount =  3u;
+    constexpr uint32_t baseMaxChunkCount = 20u;
 
+    if (!(chunkScale > 0.0f))
+      chunkScale = 1.0f;
+
+    m_minChunkCount = std::max(1u, uint32_t(float(baseMinChunkCount) * chunkScale + 0.5f));
+    m_maxChunkCount = std::max(m_minChunkCount, uint32_t(float(baseMaxChunkCount) * chunkScale + 0.5f));
   }
 
   bool GpuFlushTracker::considerFlush(
@@ -13,8 +25,8 @@ namespace dxvk {
           uint32_t              lastCompleteSubmissionId) {
     constexpr uint32_t minPendingSubmissions = 2;
 
-    constexpr uint32_t minChunkCount =  3u;
-    constexpr uint32_t maxChunkCount = 20u;
+    const uint32_t minChunkCount = m_minChunkCount;
+    const uint32_t maxChunkCount = m_maxChunkCount;
 
     // Do not flush if there is nothing to flush
     uint32_t chunkCount = uint32_t(chunkId - m_lastFlushChunkId);
