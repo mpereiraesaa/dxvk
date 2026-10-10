@@ -171,6 +171,14 @@ namespace dxvk {
 
     /// Add an extra front buffer to make GetFrontBufferData() work correctly when the swapchain only has a single buffer
     bool extraFrontbuffer;
+
+    /// Treat a change of render target 0 as a weak flush hint instead of a
+    /// strong one. A strong hint submits the recorded commands to the GPU
+    /// once three command chunks are pending, a weak hint once six are, so
+    /// games that switch the main render target hundreds of times per frame
+    /// submit about half as often. Locks and queries still force a submission
+    /// when fewer than two are in flight, so readback latency is unaffected.
+    bool weakRenderTargetFlushHint;
   };
 
 }

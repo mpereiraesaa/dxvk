@@ -1660,8 +1660,9 @@ namespace dxvk {
     if (m_state.renderTargets[RenderTargetIndex] == rt)
       return D3D_OK;
 
-    // Do a strong flush if the first render target is changed.
-    ConsiderFlush(RenderTargetIndex == 0
+    // Do a strong flush if the first render target is changed, unless the
+    // config asks for the weak hint (d3d9.weakRenderTargetFlushHint).
+    ConsiderFlush(RenderTargetIndex == 0 && !m_d3d9Options.weakRenderTargetFlushHint
       ? GpuFlushType::ImplicitStrongHint
       : GpuFlushType::ImplicitWeakHint);
     m_flags.set(D3D9DeviceFlag::DirtyFramebuffer);
