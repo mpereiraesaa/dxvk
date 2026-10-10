@@ -7149,6 +7149,7 @@ namespace dxvk {
 
     EmitCs([this,
       cSlot     = slot,
+      cStage    = GetShaderStage(samplerInfo.first),
       cState    = D3D9SamplerInfo(m_state.samplerStates[Sampler]),
       cIsCube   = bool(m_cubeTextures & (1u << Sampler)),
       cIsDepth  = bool(m_depthTextures & (1u << Sampler)),
@@ -7201,8 +7202,8 @@ namespace dxvk {
       if (key.u.p.hasBorder)
         DecodeD3DCOLOR(cState.borderColor, key.borderColor.float32);
 
-      VkShaderStageFlags stage = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
-      ctx->bindResourceSampler(stage, cSlot, m_dxvkDevice->createSampler(key));
+      // Only dirty the descriptor set of the stage that owns the slot
+      ctx->bindResourceSampler(cStage, cSlot, m_dxvkDevice->createSampler(key));
 
       // Let the main thread know about current sampler stats
       uint64_t liveCount = m_dxvkDevice->getSamplerStats().liveCount;
@@ -7225,10 +7226,11 @@ namespace dxvk {
 
     EmitCs([
       cSlot = slot,
+      cStage = GetShaderStage(shaderSampler.first),
       cImageView = commonTex->GetSampleView(srgb)
     ](DxvkContext* ctx) mutable {
-      VkShaderStageFlags stage = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
-      ctx->bindResourceImageView(stage, cSlot, std::move(cImageView));
+      // Only dirty the descriptor set of the stage that owns the slot
+      ctx->bindResourceImageView(cStage, cSlot, std::move(cImageView));
     });
   }
 
@@ -7243,8 +7245,7 @@ namespace dxvk {
         uint32_t slot = computeResourceSlotId(shaderSampler.first,
           DxsoBindingType::Image, uint32_t(shaderSampler.second));
 
-        VkShaderStageFlags stage = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
-        ctx->bindResourceImageView(stage, slot, nullptr);
+        ctx->bindResourceImageView(GetShaderStage(shaderSampler.first), slot, nullptr);
       }
     });
   }
