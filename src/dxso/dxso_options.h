@@ -50,6 +50,12 @@ namespace dxvk {
     /// that expect a different depth test range, which was typically a D3D8 quirk on
     /// early NVIDIA hardware.
     int32_t drefScaling = 0;
+
+    /// Declare and zero-fill every TEXCOORD0-7 and FOG vertex shader
+    /// output the shader does not write, so the output mask covers all
+    /// inputs a fixed-function or SM1/2 pixel shader can read and the
+    /// pair can be fast-linked instead of late-compiled.
+    bool padVsOutputs = false;
   };
 
 }

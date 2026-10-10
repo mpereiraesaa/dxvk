@@ -9,6 +9,7 @@ namespace dxvk {
     numCompilerThreads    = config.getOption<int32_t> ("dxvk.numCompilerThreads",     0);
     enableGraphicsPipelineLibrary = config.getOption<Tristate>("dxvk.enableGraphicsPipelineLibrary", Tristate::Auto);
     trackPipelineLifetime = config.getOption<Tristate>("dxvk.trackPipelineLifetime",  Tristate::Auto);
+    logFastLinkFailures   = config.getOption<bool>    ("dxvk.logFastLinkFailures",    false);
     useRawSsbo            = config.getOption<Tristate>("dxvk.useRawSsbo",             Tristate::Auto);
     hud                   = config.getOption<std::string>("dxvk.hud", "");
     tearFree              = config.getOption<Tristate>("dxvk.tearFree",               Tristate::Auto);
