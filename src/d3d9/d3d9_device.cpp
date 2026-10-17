@@ -8851,6 +8851,10 @@ namespace dxvk {
      || !D3D9TexturePack::supportsFormat(format))
       return;
 
+    // Only sizes the pack has, unless every upload is being dumped.
+    if (!m_texturePack.dumping() && !m_texturePack.hasSize(BlockCount.width, BlockCount.height))
+      return;
+
     // The whole level, not the dirty box: the hash names the texture.
     uint64_t hash = D3D9TexturePack::hash(pData,
       size_t(BlockCount.width) * ElementSize, BlockCount.height, Pitch);
@@ -8861,7 +8865,9 @@ namespace dxvk {
     if (!m_texturePack.replacing())
       return;
 
-    const D3D9TexturePackView* view = GetTexturePackView(hash, pTexture->GetFormatMapping());
+    const D3D9TexturePackView* view = m_texturePack.hasSize(BlockCount.width, BlockCount.height)
+      ? GetTexturePackView(BlockCount.width, BlockCount.height, hash, pTexture->GetFormatMapping())
+      : nullptr;
 
     if (pTexture->SetPackView(view)) {
       for (uint32_t i : bit::BitMask(m_activeTextures)) {
@@ -8873,6 +8879,8 @@ namespace dxvk {
 
 
   const D3D9TexturePackView* D3D9DeviceEx::GetTexturePackView(
+          uint32_t                  Width,
+          uint32_t                  Height,
           uint64_t                  Hash,
     const D3D9_VK_FORMAT_MAPPING&   Mapping) {
     auto entry = m_texturePackViews.find(Hash);
@@ -8881,7 +8889,7 @@ namespace dxvk {
       return entry->second.color != nullptr ? &entry->second : nullptr;
 
     D3D9TexturePackView& view = m_texturePackViews[Hash];
-    auto image = m_texturePack.load(Hash);
+    auto image = m_texturePack.load(Width, Height, Hash);
 
     if (!image)
       return nullptr;

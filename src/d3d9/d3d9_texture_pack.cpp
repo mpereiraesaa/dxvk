@@ -7,6 +7,9 @@
 #include "../util/log/log.h"
 #include "../util/util_string.h"
 
+#define XXH_INLINE_ALL
+#include "../util/xxhash.h"
+
 #define STB_IMAGE_IMPLEMENTATION
 #define STBI_ONLY_PNG
 #define STBI_NO_STDIO
@@ -18,9 +21,10 @@
 
 namespace dxvk {
 
-  static std::string hashName(uint64_t hash) {
-    char name[17];
-    std::snprintf(name, sizeof(name), "%016llx", static_cast<unsigned long long>(hash));
+  static std::string fileName(uint32_t width, uint32_t height, uint64_t hash, const char* extension) {
+    char name[64];
+    std::snprintf(name, sizeof(name), "%ux%u-%016llx.%s", width, height,
+      static_cast<unsigned long long>(hash), extension);
     return name;
   }
 
@@ -39,14 +43,16 @@ namespace dxvk {
     for (const auto& entry : std::filesystem::directory_iterator(str::topath(m_packDir.c_str()), ec)) {
       std::string name = entry.path().filename().string();
 
-      if (name.size() != 20 || name.compare(16, 4, ".png"))
+      unsigned width = 0, height = 0;
+      unsigned long long value = 0;
+      char extension[8] = { };
+
+      if (std::sscanf(name.c_str(), "%ux%u-%16llx.%7s", &width, &height, &value, extension) != 4
+       || std::strcmp(extension, "png") || !width || !height || width > 0xffff || height > 0xffff)
         continue;
 
-      char* end = nullptr;
-      uint64_t value = std::strtoull(name.substr(0, 16).c_str(), &end, 16);
-
-      if (end && *end == '\0')
-        m_available.insert(value);
+      m_available.insert({ value, sizeKey(width, height) });
+      m_sizes.insert(sizeKey(width, height));
     }
 
     Logger::info(str::format("D3D9: Texture pack ", m_packDir, ": ", m_available.size(), " images"));
@@ -73,26 +79,17 @@ namespace dxvk {
           size_t  rowBytes,
           uint32_t rows,
           size_t  pitch) {
-    // FNV-1a over 64-bit little-endian words, then the row's tail bytes:
-    // every texture upload is hashed while a pack is set, so a word at a
-    // time keeps that cheap on a console CPU.
-    uint64_t value = 0xcbf29ce484222325ull;
+    // XXH3-64 of the rows back to back, without the pitch's padding.
+    if (pitch == rowBytes)
+      return XXH3_64bits(data, rowBytes * rows);
 
-    for (uint32_t y = 0; y < rows; y++) {
-      auto row = reinterpret_cast<const uint8_t*>(data) + y * pitch;
-      size_t i = 0;
+    XXH3_state_t state;
+    XXH3_64bits_reset(&state);
 
-      for (; i + 8 <= rowBytes; i += 8) {
-        uint64_t word;
-        std::memcpy(&word, row + i, sizeof(word));
-        value = (value ^ word) * 0x100000001b3ull;
-      }
+    for (uint32_t y = 0; y < rows; y++)
+      XXH3_64bits_update(&state, reinterpret_cast<const uint8_t*>(data) + y * pitch, rowBytes);
 
-      for (; i < rowBytes; i++)
-        value = (value ^ row[i]) * 0x100000001b3ull;
-    }
-
-    return value;
+    return XXH3_64bits_digest(&state);
   }
 
 
@@ -149,7 +146,7 @@ namespace dxvk {
       }
     }
 
-    std::string path = str::format(m_dumpDir, "/", hashName(hash), ".tga");
+    std::string path = str::format(m_dumpDir, "/", fileName(width, height, hash, "tga"));
 
     if (FILE* file = std::fopen(path.c_str(), "wb")) {
       std::fwrite(out.data(), 1, out.size(), file);
@@ -158,11 +155,11 @@ namespace dxvk {
   }
 
 
-  std::unique_ptr<D3D9TexturePack::Image> D3D9TexturePack::load(uint64_t hash) const {
-    if (!m_available.count(hash))
+  std::unique_ptr<D3D9TexturePack::Image> D3D9TexturePack::load(uint32_t width, uint32_t height, uint64_t hash) const {
+    if (!m_available.count({ hash, sizeKey(width, height) }))
       return nullptr;
 
-    std::string path = str::format(m_packDir, "/", hashName(hash), ".png");
+    std::string path = str::format(m_packDir, "/", fileName(width, height, hash, "png"));
     std::vector<uint8_t> file;
 
     if (FILE* handle = std::fopen(path.c_str(), "rb")) {

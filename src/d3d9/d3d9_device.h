@@ -996,6 +996,8 @@ namespace dxvk {
             VkDeviceSize        Pitch);
 
     const D3D9TexturePackView* GetTexturePackView(
+            uint32_t                  Width,
+            uint32_t                  Height,
             uint64_t                  Hash,
       const D3D9_VK_FORMAT_MAPPING&   Mapping);
 
