@@ -30,7 +30,8 @@ namespace dxvk {
    * from dxvk.conf, or the environment, which wins:
    *
    *  - d3d9.textureDump / DXVK_TEXTURE_DUMP=<dir> writes each distinct
-   *    upload once, as <dir>/<w>x<h>-<hash>.tga, the art a pack starts from.
+   *    upload once, as <dir>/<w>x<h>-<hash>.tga, the art a pack starts from;
+   *    d3d9.textureDumpMaxSize leaves out textures wider or taller than it.
    *  - d3d9.texturePack / DXVK_TEXTURE_PACK=<dir> replaces an upload whose
    *    size and hash have a <dir>/<w>x<h>-<hash>.png. The image may be any
    *    size; games that sample with normalised coordinates show it at its
@@ -53,9 +54,14 @@ namespace dxvk {
       std::vector<uint8_t> bgra;
     };
 
-    void configure(const std::string& dumpDir, const std::string& packDir);
+    void configure(const std::string& dumpDir, uint32_t dumpMaxSize, const std::string& packDir);
 
     bool dumping() const { return !m_dumpDir.empty(); }
+
+    /// Whether uploads of this size are dumped
+    bool dumpsSize(uint32_t width, uint32_t height) const {
+      return dumping() && (!m_dumpMaxSize || (width <= m_dumpMaxSize && height <= m_dumpMaxSize));
+    }
 
     bool replacing() const { return !m_packDir.empty(); }
 
@@ -89,6 +95,7 @@ namespace dxvk {
   private:
 
     std::string                   m_dumpDir;
+    uint32_t                      m_dumpMaxSize = 0;
     std::string                   m_packDir;
     struct Key {
       uint64_t hash;

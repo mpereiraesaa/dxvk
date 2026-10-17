@@ -29,8 +29,9 @@ namespace dxvk {
   }
 
 
-  void D3D9TexturePack::configure(const std::string& dumpDir, const std::string& packDir) {
+  void D3D9TexturePack::configure(const std::string& dumpDir, uint32_t dumpMaxSize, const std::string& packDir) {
     m_dumpDir = dumpDir;
+    m_dumpMaxSize = dumpMaxSize;
     m_packDir = packDir;
 
     if (m_packDir.empty())
