@@ -16,6 +16,7 @@
 #include "d3d9_state.h"
 
 #include "d3d9_options.h"
+#include "d3d9_texture_pack.h"
 
 #include "../dxso/dxso_module.h"
 #include "../dxso/dxso_util.h"
@@ -981,6 +982,23 @@ namespace dxvk {
 
     void MarkTextureBindingDirty(IDirect3DBaseTexture9* texture);
 
+    /**
+     * \brief Swaps a texture for the pack's image of its content
+     *
+     * Called for each level-0 upload while DXVK_TEXTURE_DUMP or
+     * DXVK_TEXTURE_PACK is set (D3D9TexturePack).
+     */
+    void ApplyTexturePack(
+            D3D9CommonTexture*  pTexture,
+      const void*               pData,
+            VkExtent3D          BlockCount,
+            uint32_t            ElementSize,
+            VkDeviceSize        Pitch);
+
+    const D3D9TexturePackView* GetTexturePackView(
+            uint64_t                  Hash,
+      const D3D9_VK_FORMAT_MAPPING&   Mapping);
+
     HRESULT STDMETHODCALLTYPE SetRenderTargetInternal(
             DWORD              RenderTargetIndex,
             IDirect3DSurface9* pRenderTarget);
@@ -1528,6 +1546,9 @@ namespace dxvk {
 
     uint32_t                        m_dirtySamplerStates = 0;
     uint32_t                        m_dirtyTextures      = 0;
+
+    D3D9TexturePack                 m_texturePack;
+    std::unordered_map<uint64_t, D3D9TexturePackView> m_texturePackViews;
 
     uint32_t                        m_activeRTsWhichAreTextures : 4;
     uint32_t                        m_alphaSwizzleRTs : 4;

@@ -62,6 +62,8 @@ namespace dxvk {
     , m_d3d9Interop        ( this )
     , m_d3d9On12           ( this )
     , m_d3d8Bridge         ( this ) {
+    m_texturePack.configure(m_d3d9Options.textureDump, m_d3d9Options.texturePack);
+
     // If we can SWVP, then we use an extended constant set
     // as SWVP has many more slots available than HWVP.
     bool canSWVP = CanSWVP();
@@ -5254,6 +5256,8 @@ namespace dxvk {
       VkDeviceSize dirtySize = extentBlockCount.width * extentBlockCount.height * extentBlockCount.depth * formatInfo->elementSize;
       D3D9BufferSlice slice = AllocStagingBuffer(dirtySize);
       const void* srcData = reinterpret_cast<const uint8_t*>(mapPtr) + copySrcOffset;
+      if (unlikely((m_texturePack.dumping() || m_texturePack.replacing()) && dstSubresource.mipLevel == 0))
+        ApplyTexturePack(pDestTexture, mapPtr, srcTexLevelExtentBlockCount, formatInfo->elementSize, pitch);
       util::packImageData(
         slice.mapPtr, srcData, extentBlockCount, formatInfo->elementSize,
         pitch, pitch * srcTexLevelExtentBlockCount.height);
@@ -8831,6 +8835,108 @@ namespace dxvk {
       return GpuFlushType::ImplicitStrongHint;
     else
       return GpuFlushType::ImplicitWeakHint;
+  }
+
+
+  void D3D9DeviceEx::ApplyTexturePack(
+          D3D9CommonTexture*  pTexture,
+    const void*               pData,
+          VkExtent3D          BlockCount,
+          uint32_t            ElementSize,
+          VkDeviceSize        Pitch) {
+    D3D9Format format = pTexture->Desc()->Format;
+
+    if (pTexture->GetType() != D3DRTYPE_TEXTURE || pTexture->Desc()->ArraySize != 1
+     || pTexture->IsRenderTarget() || pTexture->IsDepthStencil()
+     || !D3D9TexturePack::supportsFormat(format))
+      return;
+
+    // The whole level, not the dirty box: the hash names the texture.
+    uint64_t hash = D3D9TexturePack::hash(pData,
+      size_t(BlockCount.width) * ElementSize, BlockCount.height, Pitch);
+
+    if (m_texturePack.dumping())
+      m_texturePack.dump(hash, format, pData, BlockCount.width, BlockCount.height, Pitch);
+
+    if (!m_texturePack.replacing())
+      return;
+
+    const D3D9TexturePackView* view = GetTexturePackView(hash, pTexture->GetFormatMapping());
+
+    if (pTexture->SetPackView(view)) {
+      for (uint32_t i : bit::BitMask(m_activeTextures)) {
+        if (GetCommonTexture(m_state.textures[i]) == pTexture)
+          m_dirtyTextures |= 1u << i;
+      }
+    }
+  }
+
+
+  const D3D9TexturePackView* D3D9DeviceEx::GetTexturePackView(
+          uint64_t                  Hash,
+    const D3D9_VK_FORMAT_MAPPING&   Mapping) {
+    auto entry = m_texturePackViews.find(Hash);
+
+    if (entry != m_texturePackViews.end())
+      return entry->second.color != nullptr ? &entry->second : nullptr;
+
+    D3D9TexturePackView& view = m_texturePackViews[Hash];
+    auto image = m_texturePack.load(Hash);
+
+    if (!image)
+      return nullptr;
+
+    std::array<VkFormat, 2> formats = { VK_FORMAT_B8G8R8A8_UNORM, VK_FORMAT_B8G8R8A8_SRGB };
+
+    DxvkImageCreateInfo info;
+    info.type             = VK_IMAGE_TYPE_2D;
+    info.format           = VK_FORMAT_B8G8R8A8_UNORM;
+    info.flags            = VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT;
+    info.viewFormatCount  = formats.size();
+    info.viewFormats      = formats.data();
+    info.sampleCount      = VK_SAMPLE_COUNT_1_BIT;
+    info.extent           = { image->width, image->height, 1u };
+    info.numLayers        = 1;
+    info.mipLevels        = 1;
+    info.usage            = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+    info.stages           = VK_PIPELINE_STAGE_TRANSFER_BIT | GetEnabledShaderStages();
+    info.access           = VK_ACCESS_TRANSFER_WRITE_BIT | VK_ACCESS_SHADER_READ_BIT;
+    info.tiling           = VK_IMAGE_TILING_OPTIMAL;
+    info.layout           = VK_IMAGE_LAYOUT_GENERAL;
+    info.debugName        = "Texture pack";
+
+    Rc<DxvkImage> vkImage = m_dxvkDevice->createImage(info, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+    D3D9BufferSlice slice = AllocStagingBuffer(image->bgra.size());
+    std::memcpy(slice.mapPtr, image->bgra.data(), image->bgra.size());
+
+    EmitCs([
+      cSrcSlice = slice.slice,
+      cImage    = vkImage,
+      cExtent   = info.extent
+    ] (DxvkContext* ctx) {
+      ctx->copyBufferToImage(cImage,
+        VkImageSubresourceLayers { VK_IMAGE_ASPECT_COLOR_BIT, 0u, 0u, 1u },
+        VkOffset3D { 0, 0, 0 }, cExtent,
+        cSrcSlice.buffer(), cSrcSlice.offset(), 0, 0, VK_FORMAT_UNDEFINED);
+    });
+
+    // The game's own swizzle: an X8R8G8B8 texture still reads alpha as one.
+    DxvkImageViewKey key;
+    key.aspects       = VK_IMAGE_ASPECT_COLOR_BIT;
+    key.usage         = VK_IMAGE_USAGE_SAMPLED_BIT;
+    key.viewType      = VK_IMAGE_VIEW_TYPE_2D;
+    key.mipIndex      = 0;
+    key.mipCount      = 1;
+    key.layerIndex    = 0;
+    key.layerCount    = 1;
+    key.packedSwizzle = DxvkImageViewKey::packSwizzle(Mapping.Swizzle);
+
+    key.format = VK_FORMAT_B8G8R8A8_UNORM;
+    view.color = vkImage->createView(key);
+    key.format = VK_FORMAT_B8G8R8A8_SRGB;
+    view.srgb  = vkImage->createView(key);
+    return &view;
   }
 
 }
