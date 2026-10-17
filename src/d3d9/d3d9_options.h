@@ -184,6 +184,14 @@ namespace dxvk {
     /// and FOG output they do not write themselves, so that any pixel
     /// shader reading them can be fast-linked with VK_EXT_graphics_pipeline_library
     bool padVsOutputs;
+
+    /// Texture pack directory: uploads whose texel hash has an image there
+    /// are replaced by it (D3D9TexturePack). DXVK_TEXTURE_PACK overrides.
+    std::string texturePack;
+
+    /// Where each distinct texture upload is written once, the art a pack
+    /// starts from. DXVK_TEXTURE_DUMP overrides.
+    std::string textureDump;
   };
 
 }

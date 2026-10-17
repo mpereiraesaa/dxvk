@@ -77,6 +77,17 @@ namespace dxvk {
     this->extraFrontbuffer              = config.getOption<bool>        ("d3d9.extraFrontbuffer",              false);
     this->weakRenderTargetFlushHint     = config.getOption<bool>        ("d3d9.weakRenderTargetFlushHint",     false);
     this->padVsOutputs                  = config.getOption<bool>        ("d3d9.padVsOutputs",                  false);
+    this->texturePack                   = config.getOption<std::string> ("d3d9.texturePack",                   "");
+    this->textureDump                   = config.getOption<std::string> ("d3d9.textureDump",                   "");
+
+    std::string texturePackEnv = env::getEnvVar("DXVK_TEXTURE_PACK");
+    std::string textureDumpEnv = env::getEnvVar("DXVK_TEXTURE_DUMP");
+
+    if (!texturePackEnv.empty())
+      this->texturePack = texturePackEnv;
+
+    if (!textureDumpEnv.empty())
+      this->textureDump = textureDumpEnv;
 
     // D3D8 options
     this->drefScaling                   = config.getOption<int32_t>     ("d3d8.scaleDref",                     0);
