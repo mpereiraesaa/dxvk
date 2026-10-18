@@ -1690,4 +1690,92 @@ namespace dxvk::hud {
     return position;
   }
 
+
+
+  HudTitleMenuItem::HudTitleMenuItem() {
+#ifdef _WIN32
+    HMODULE ntdll = ::GetModuleHandleA("ntdll.dll");
+
+    if (ntdll)
+      m_query = reinterpret_cast<QueryProc>(reinterpret_cast<void*>(
+        ::GetProcAddress(ntdll, "NtQueryInformationProcess")));
+#endif
+  }
+
+
+  HudTitleMenuItem::~HudTitleMenuItem() {
+
+  }
+
+
+  void HudTitleMenuItem::update(dxvk::high_resolution_clock::time_point time) {
+    if (!m_query)
+      return;
+
+    TitleMenu menu = { };
+
+    // A Wine without the class never gains it: stop asking.
+    if (m_query(reinterpret_cast<void*>(intptr_t(-1)), ProcessInfoClass, &menu, sizeof(menu), nullptr)
+     || menu.version != MenuVersion) {
+      m_query = nullptr;
+      m_menu = { };
+      return;
+    }
+
+    menu.lines = std::min(menu.lines, MenuLines);
+    menu.title[MenuColumns - 1] = '\0';
+
+    for (uint32_t i = 0; i < menu.lines; i++)
+      menu.line[i][MenuColumns - 1] = '\0';
+
+    m_menu = menu;
+  }
+
+
+  HudPos HudTitleMenuItem::render(
+    const DxvkContextObjects& ctx,
+    const HudPipelineKey&     key,
+    const HudOptions&         options,
+          HudRenderer&        renderer,
+          HudPos              position) {
+    if (!m_menu.open)
+      return position;
+
+    constexpr uint32_t TitleSize = 28;
+    constexpr uint32_t LineSize = 22;
+    constexpr int32_t LineHeight = 34;
+
+    // The font is monospaced; centre the widest line on the image.
+    VkExtent2D surface = renderer.getPushConstants().surfaceSize;
+    int32_t width = int32_t(float(surface.width) / options.scale);
+    int32_t height = int32_t(float(surface.height) / options.scale);
+
+    auto textWidth = [] (uint32_t size, size_t length) {
+      return int32_t(length * size * g_hudFont.advance / g_hudFont.size);
+    };
+
+    int32_t widest = textWidth(TitleSize, std::strlen(m_menu.title));
+
+    for (uint32_t i = 0; i < m_menu.lines; i++)
+      widest = std::max(widest, textWidth(LineSize, std::strlen(m_menu.line[i]) + 2));
+
+    int32_t x = std::max(8, (width - widest) / 2);
+    int32_t y = std::max(position.y + int32_t(TitleSize), (height - LineHeight * int32_t(m_menu.lines + 2)) / 2);
+
+    // Colours are 0xAABBGGRR: the title in the HUD's red, the selected line
+    // in yellow, the others light grey.
+    renderer.drawText(TitleSize, { x, y }, 0xff4040ffu, m_menu.title);
+    y += LineHeight + LineHeight / 2;
+
+    for (uint32_t i = 0; i < m_menu.lines; i++) {
+      bool selected = int32_t(i) == m_menu.selected;
+
+      renderer.drawText(LineSize, { x, y }, selected ? 0xff40ffffu : 0xffc0c0c0u,
+        str::format(selected ? "> " : "  ", m_menu.line[i]));
+      y += LineHeight;
+    }
+
+    return position;
+  }
+
 }

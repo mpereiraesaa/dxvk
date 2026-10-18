@@ -779,4 +779,56 @@ namespace dxvk::hud {
 
   };
 
+
+  /**
+   * \brief prospero-win title menu
+   *
+   * On a PS5, the prospero-win title keeps an in-game menu (opened with
+   * L3+R3) and its Wine hands the menu's text to the game through a
+   * private process information class (prospero-win patch 0973). This
+   * item asks once a frame and draws the menu in the middle of the image.
+   * Without the class the first query fails and the item draws nothing.
+   */
+  class HudTitleMenuItem : public HudItem {
+
+  public:
+
+    HudTitleMenuItem();
+
+    ~HudTitleMenuItem();
+
+    void update(dxvk::high_resolution_clock::time_point time);
+
+    HudPos render(
+      const DxvkContextObjects& ctx,
+      const HudPipelineKey&     key,
+      const HudOptions&         options,
+            HudRenderer&        renderer,
+            HudPos              position);
+
+  private:
+
+    // struct pw_title_menu, prospero-win's wine/ps5/menu/pw_title_menu.h
+    constexpr static uint32_t ProcessInfoClass = 0x50574D01u;
+    constexpr static uint32_t MenuVersion = 1u;
+    constexpr static uint32_t MenuLines = 16u;
+    constexpr static uint32_t MenuColumns = 48u;
+
+    struct TitleMenu {
+      uint32_t version;
+      uint32_t sequence;
+      uint32_t open;
+      uint32_t lines;
+      int32_t  selected;
+      char     title[MenuColumns];
+      char     line[MenuLines][MenuColumns];
+    };
+
+    using QueryProc = int32_t (__stdcall *)(void*, uint32_t, void*, uint32_t, uint32_t*);
+
+    QueryProc   m_query = nullptr;
+    TitleMenu   m_menu = { };
+
+  };
+
 }
