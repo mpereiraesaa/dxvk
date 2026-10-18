@@ -5,6 +5,7 @@
 #include "d3d9_caps.h"
 #include "d3d9_mem.h"
 #include "d3d9_interop.h"
+#include "d3d9_texture_pack.h"
 
 #include "../dxvk/dxvk_device.h"
 
@@ -342,7 +343,19 @@ namespace dxvk {
     void MarkAllNeedReadback() { m_needsReadback.setAll(); }
 
     const Rc<DxvkImageView>& GetSampleView(bool srgb) const {
+      if (unlikely(m_packView != nullptr))
+        return srgb && IsSrgbCompatible() ? m_packView->srgb : m_packView->color;
       return m_sampleView.Pick(srgb && IsSrgbCompatible());
+    }
+
+    /**
+     * \brief Shows a texture pack image in place of the texture
+     * \returns \c true when that changed what samplers read
+     */
+    bool SetPackView(const D3D9TexturePackView* view) {
+      bool changed = m_packView != view;
+      m_packView = view;
+      return changed;
     }
 
     VkImageLayout DetermineRenderTargetLayout(VkImageLayout hazardLayout) const {
@@ -523,6 +536,9 @@ namespace dxvk {
     bool                          m_transitionedToHazardLayout = false;
 
     D3D9ColorView                 m_sampleView;
+
+    /// A texture pack's image for the current content (D3D9TexturePack)
+    const D3D9TexturePackView*    m_packView = nullptr;
 
     D3D9SubresourceBitset         m_locked = { };
 
