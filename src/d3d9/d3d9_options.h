@@ -192,6 +192,10 @@ namespace dxvk {
     /// Where each distinct texture upload is written once, the art a pack
     /// starts from. DXVK_TEXTURE_DUMP overrides.
     std::string textureDump;
+
+    /// Largest width or height dumped; 0 dumps every size. Keeps a dump of
+    /// a game's interface from filling up with its large textures.
+    uint32_t textureDumpMaxSize;
   };
 
 }

@@ -62,7 +62,7 @@ namespace dxvk {
     , m_d3d9Interop        ( this )
     , m_d3d9On12           ( this )
     , m_d3d8Bridge         ( this ) {
-    m_texturePack.configure(m_d3d9Options.textureDump, m_d3d9Options.texturePack);
+    m_texturePack.configure(m_d3d9Options.textureDump, m_d3d9Options.textureDumpMaxSize, m_d3d9Options.texturePack);
 
     // If we can SWVP, then we use an extended constant set
     // as SWVP has many more slots available than HWVP.
@@ -8851,15 +8851,17 @@ namespace dxvk {
      || !D3D9TexturePack::supportsFormat(format))
       return;
 
-    // Only sizes the pack has, unless every upload is being dumped.
-    if (!m_texturePack.dumping() && !m_texturePack.hasSize(BlockCount.width, BlockCount.height))
+    // Only sizes the pack has or the dump takes.
+    bool dump = m_texturePack.dumpsSize(BlockCount.width, BlockCount.height);
+
+    if (!dump && !m_texturePack.hasSize(BlockCount.width, BlockCount.height))
       return;
 
     // The whole level, not the dirty box: the hash names the texture.
     uint64_t hash = D3D9TexturePack::hash(pData,
       size_t(BlockCount.width) * ElementSize, BlockCount.height, Pitch);
 
-    if (m_texturePack.dumping())
+    if (dump)
       m_texturePack.dump(hash, format, pData, BlockCount.width, BlockCount.height, Pitch);
 
     if (!m_texturePack.replacing())
